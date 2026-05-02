@@ -1,0 +1,13 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+
+# EPG Data
+Output/build_log.txt
+*.xml
+
+# IDE
+.vscode/
+.idea/
+Output/epg_zgemma.xml.gz
