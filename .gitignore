@@ -10,4 +10,3 @@ Output/build_log.txt
 # IDE
 .vscode/
 .idea/
-Output/epg_zgemma.xml.gz
