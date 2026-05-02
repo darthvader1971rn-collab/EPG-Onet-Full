@@ -121,7 +121,6 @@ CHANNELS = {
     "FilmBox Premium": ("filmbox-premium-85", "onet", "FilmBoxPremiumHD.pl"),
     "Fokus TV HD": ("fokus-tv-hd-47", "onet", "FokusTVHD.pl"),
     "Food Network HD": ("polsat-food-network-hd-209", "onet", "FoodNetworkHD.pl"),
-    "France 24 HD": ("france-24-hd-632", "onet", "France24HD.pl"),
     "FX Comedy HD": ("fox-comedy-hd-405", "onet", "FXComedyHD.pl"),
     "FX HD": ("fox-hd-128", "onet", "FXHD.pl"),
     "Gametoon HD": ("gametoon-hd-602", "onet", "GametoonHD.pl"),
@@ -661,19 +660,23 @@ class EPGMerger:
         return results
 
     def run(self, selected_days, detailed_days):
-        """Koordynuje pobieranie i generuje raport końcowy."""
+        """Koordynuje pobieranie z systemem Fallback dla EPG zewnętrznego."""
         logging.info(f"Rozpoczynam pobieranie dla dni: {selected_days}")
         start_count = len(self.all_programmes)
         
         # 1. Główne źródła: Onet i Interia (Wielowątkowo)
         with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
-            # Uruchamiamy parser tylko dla natywnych źródeł skryptu
+            # Puszczamy parser tylko dla źródeł 'onet' i 'interia'
             futures = [executor.submit(self.process_channel, n, i, s, eid, selected_days, detailed_days) 
                        for n, (i, s, eid) in CHANNELS.items() if s in ['onet', 'interia']]
             for f in concurrent.futures.as_completed(futures):
                 self.all_programmes.extend(f.result())
 
-        # 2. Uzupełnianie z zewnętrznych list XML (Normalizator)
+        # Zabezpieczenie Fallback (Dla Interii i kanałów XML)
+        # my_epg_ids to wszystkie unikalne ID (trzeci parametr), do których chcemy przypisać EPG
+        my_epg_ids = {v[2] for v in CHANNELS.values()}
+
+        # 2. Uzupełnianie z zewnętrznych list XML (Normalizator / Fallback)
         EXTERNAL_SOURCES = [
             OVH_URL, 
             OTOPAY_URL,
@@ -683,19 +686,16 @@ class EPGMerger:
         
         logging.info(f"Sprawdzanie źródeł zewnętrznych ({len(EXTERNAL_SOURCES)} źródeł)...")
         xml_added = 0
-        my_epg_ids = {v[2] for v in CHANNELS.values()}
         
         for idx, url in enumerate(EXTERNAL_SOURCES, 1):
             try:
                 logging.info(f"[*] Pobieranie EPG ze źródła [{idx}/{len(EXTERNAL_SOURCES)}]: {url}")
                 r = requests.get(url, headers=HEADERS, timeout=30, allow_redirects=True)
                 
-                # ZABEZPIECZENIE: Jeśli serwer zwróci błąd, pomijamy źródło
                 if r.status_code != 200:
                     logging.warning(f"  [!] Pominięto: Serwer zwrócił kod {r.status_code}")
                     continue
                 
-                # Próba dekompresji i parsowania XML
                 try:
                     content = gzip.decompress(r.content) if url.endswith(".gz") else r.content
                     ext_xml = ET.fromstring(content)
@@ -707,7 +707,13 @@ class EPGMerger:
                     cid = p.get("channel")
                     start = p.get("start")
                     
+                    # LOGIKA FALLBACK / NORMALIZATORA
+                    # Sprawdzamy czy:
+                    # 1. Pobrany kanał jest na naszej liście (cid in my_epg_ids)
+                    # 2. Nie mamy jeszcze audycji o tej godzinie dla tego kanału (!in added_events)
+                    # To ratuje nas, gdy Interia dla Eurosportu np. wyrzuci błąd i nie doda eventów.
                     if cid and start and cid in my_epg_ids and (cid, start) not in self.added_events:
+                        
                         # NORMALIZACJA: Wymuszamy dodanie języka "pl" dla zgodności z formatem OVH
                         for tag in ['title', 'desc', 'category']:
                             el = p.find(tag)
@@ -715,6 +721,7 @@ class EPGMerger:
                                 el.set('lang', 'pl')
                                 
                         self.all_programmes.append(p)
+                        # Oznaczamy, że dodaliśmy EPG, więc kolejne pliki XML nie nadpiszą już tej audycji
                         self.added_events[(cid, start)] = p.find("desc") is not None
                         xml_added += 1
                         
@@ -727,9 +734,9 @@ class EPGMerger:
         
         logging.info("="*50)
         logging.info("PODSUMOWANIE SESJI:")
-        logging.info(f" - Przetworzone kanały: {self.stats['ok']} OK, {self.stats['errors']} Błędów")
+        logging.info(f" - Przetworzone kanały główne (Onet/Interia): {self.stats['ok']} OK, {self.stats['errors']} Błędów")
         logging.info(f" - Nowo pobrane audycje (Portal): {new_items - xml_added}")
-        logging.info(f" - Uzupełnione z XML: {xml_added}")
+        logging.info(f" - Uzupełnione z list XML (np. Otopay/OVH): {xml_added}")
         logging.info(f" - Całkowita liczba audycji w bazie: {end_count}")
         logging.info("="*50)
 
