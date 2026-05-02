@@ -790,21 +790,31 @@ def start_gui():
     tk.Checkbutton(root, text="POBIERZ WSZYSTKO (Start projektu)", variable=all_mode, font=('Arial', 10, 'bold'), fg="red").pack(pady=10)
     
     tk.Label(root, text="Lub wybierz dni ręcznie (Szczegółowo):", font=('Arial', 9)).pack()
-    vars = {}
-    for i in range(-4, 13):
+    
+    vars_dict = {}
+    # Zakres dni 0-12 (standardowe okno EPG)
+    for i in range(0, 13):
+        # Domyślnie zaznaczone tylko dni 1 i 12
         v = tk.BooleanVar(value=(i in [1, 12]))
-        tk.Checkbutton(root, text=f"Dzień {i:2d}", variable=v).pack(anchor='w', padx=80)
-        vars[i] = v
+        tk.Checkbutton(root, text=f"Dzień +{i}", variable=v).pack(anchor='w', padx=100)
+        vars_dict[i] = v
 
     def launch():
+        # Zczytujemy z GUI wszystkie dni, przy których widnieje "ptaszek"
+        checked_days = [d for d, v in vars_dict.items() if v.get()]
+
         if all_mode.get():
-            # Logika "Pobierz wszystko": 0-11 ogólnie, 0, 1, 12 szczegółowo
-            selected = list(range(0, 13))
-            detailed = [0, 1, 12]
+            # "Pobierz wszystko" ZAZNACZONE:
+            # - wywołujemy wszystkie dni z listy (od 0 do 12)
+            # - PEŁNE EPG dostają tylko te zaznaczone, reszta to OGÓLNE
+            selected = list(vars_dict.keys())
+            detailed = checked_days
         else:
-            # Logika ręczna: tylko zaznaczone dni są pobierane szczegółowo
-            selected = [d for d, v in vars.items() if v.get()]
-            detailed = selected
+            # "Pobierz wszystko" ODZNACZONE:
+            # - wywołujemy tylko zaznaczone dni (domyślnie 1 i 12, plus to co doklikasz)
+            # - wszystkie wywołane dostają PEŁNE EPG
+            selected = checked_days
+            detailed = checked_days
             
         root.destroy()
         m = EPGMerger()
@@ -820,7 +830,7 @@ if __name__ == "__main__":
     if "--auto" in sys.argv:
         m = EPGMerger()
         m.load_history()
-        # GitHub: Dzień +1 i +12 zawsze szczegółowo
+        # GitHub (Tryb auto): Zgodnie z wytycznymi, na serwerze wystarczy tylko 1 i 12 (pełne)
         m.run(selected_days=[1, 12], detailed_days=[1, 12])
         m.save()
     else:
