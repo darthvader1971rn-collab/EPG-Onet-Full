@@ -751,11 +751,54 @@ class EPGMerger:
                 "generator-info-url": "https://epg.ovh"
             })
             
-            # Dodawanie definicji kanałów
+            # --- GENERATOR ALIASÓW (Super Matching System) ---
+            # Buduje dziesiątki różnych wariantów nazw dla jednego kanału,
+            # aby aplikacje IPTV zawsze mogły dopasować EPG do listy M3U.
             for name, (_, _, eid) in CHANNELS.items():
                 ch = ET.SubElement(root, "channel", id=eid)
-                ET.SubElement(ch, "display-name").text = name
                 
+                # Słownik do przechowywania unikalnych, sformatowanych nazw
+                unique_names = set()
+                
+                # Wzorce do generowania (Na podstawie logiki OVH)
+                patterns = [
+                    "{base}",
+                    "PL: {base}",
+                    "PL: {base} HD",
+                    "PL: {base} FHD",
+                    "PL| {base}",
+                    "PL| {base} HD",
+                    "{base} PL",
+                    "{base} HD PL",
+                    "{base} FHD PL",
+                    "{base} HD",
+                    "{base} FHD",
+                    "{base} sd",
+                    "{base} [PL]"
+                ]
+                
+                # Funkcja czyszcząca nazwę z dopisków jakości przed generowaniem
+                # (żeby z "Polsat HD" nie zrobić "Polsat HD HD")
+                clean_base = re.sub(r'(?i)\s+(HD|FHD|4K|UHD|SD)$', '', name).strip()
+                
+                # Generujemy wszystkie kombinacje
+                for pattern in patterns:
+                    # Dodajemy wariant z czystą nazwą (np. "Polsat HD" -> "PL: Polsat HD")
+                    unique_names.add(pattern.format(base=clean_base))
+                
+                # Dodajemy do XML unikalne warianty wygenerowane z szablonów
+                for display_name in sorted(unique_names):
+                    ET.SubElement(ch, "display-name", lang="pl").text = display_name
+                
+                # Wymuszamy dodanie oryginalnej nazwy ze słownika, jeśli nie ma jej na liście
+                # i dodajemy unikalne ID dostawcy EPG (np. "Alekino+HD.pl"),
+                # na którym często bazują aplikacje typu Smart IPTV.
+                custom_names = [name, eid]
+                for custom_name in custom_names:
+                    if custom_name not in unique_names:
+                        ET.SubElement(ch, "display-name", lang="pl").text = custom_name
+                        unique_names.add(custom_name)
+                        
             # Dodawanie audycji do struktury
             for p in self.all_programmes:
                 if filter_z and p.get("start")[:14] > limit_zgemma: 
