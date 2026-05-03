@@ -726,7 +726,9 @@ class EPGMerger:
                         xml_added += 1
                         
             except Exception as e:
-                logging.error(f"  [!] BŁĄD Fuzji EPG z {url}: {e}")
+                import traceback
+                logging.error(f"  [!] SZCZEGÓŁOWY BŁĄD Fuzji EPG z {url}:")
+                logging.error("\n" + traceback.format_exc())
 
         # 3. Podsumowanie sesji
         end_count = len(self.all_programmes)
