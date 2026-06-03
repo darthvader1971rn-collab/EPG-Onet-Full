@@ -882,8 +882,9 @@ if __name__ == "__main__":
     if "--auto" in sys.argv:
         m = EPGMerger()
         m.load_history()
-        # GitHub (Tryb auto): Zgodnie z wytycznymi, na serwerze wystarczy tylko 1 i 12 (pełne)
-        m.run(selected_days=[1, 12], detailed_days=[1, 12])
+        # GitHub (Tryb auto): Nadrabianie dni 0 oraz 2-11. 
+        # Dni 1 i 12 są już w bazie (wczytane z historii), więc ich tu nie wywołujemy.
+        m.run(selected_days=[0, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11], detailed_days=[0, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11])
         m.save()
     else:
         start_gui()
