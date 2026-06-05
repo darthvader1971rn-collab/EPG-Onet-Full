@@ -2,7 +2,7 @@ name: EPG-Multi-Source-Grabber
 
 on:
   schedule:
-    - cron: '5 1 * * *' # 3:05 rano czasu PL
+    - cron: '5 0 * * *' # 3:05 rano czasu PL
   workflow_dispatch:
 
 permissions:
