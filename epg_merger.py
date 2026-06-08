@@ -883,7 +883,7 @@ if __name__ == "__main__":
         m = EPGMerger()
         m.load_history()
         # GitHub (Tryb auto): Zgodnie z wytycznymi, na serwerze wystarczy tylko 1 i 12 (pełne)
-        m.run(selected_days=[1, 12], detailed_days=[1, 12])
+        m.run(selected_days=[0, 1, 12], detailed_days=[0, 1, 12])
         m.save()
     else:
         start_gui()
