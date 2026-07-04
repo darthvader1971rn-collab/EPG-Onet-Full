@@ -335,8 +335,8 @@ CHANNELS = {
 
 def clean_xml_text(text):
     if not text: return ""
-    text = re.sub(r'[\x00-\x08\x0b\x0c\x0e-\x1f]', '', text)
-    return html.escape(text)
+    # Usuwamy tylko niedozwolone znaki sterujące XML, nie tykamy cudzysłowów ani ampersandów
+    return re.sub(r'[\x00-\x08\x0b\x0c\x0e-\x1f]', '', text)
 
 class EPGMerger:
     def __init__(self):
@@ -400,6 +400,8 @@ class EPGMerger:
             if r.status_code != 200: 
                 return details
                 
+            # Wymuszamy poprawne kodowanie UTF-8 dla podstrony ze szczegółami
+            r.encoding = 'utf-8'
             s = BeautifulSoup(r.text, 'lxml')
 
             # 1. Opis
@@ -502,6 +504,8 @@ class EPGMerger:
                         self.stats["errors"] += 1
                         continue
 
+                    # Wymuszamy poprawne kodowanie dla Onetu, by uniknąć problemów z tekstami
+                    r.encoding = 'utf-8'
                     items = BeautifulSoup(r.text, 'lxml').find_all('li')
                     prog_count = 0
                     
@@ -519,7 +523,7 @@ class EPGMerger:
                             continue
 
                         title_a = item.find('div', class_='titles').find('a')
-                        title_text = clean_xml_text(title_a.text)
+                        title_text = clean_xml_text(title_a.get_text(strip=True))
                         
                         # Budowa głównego tagu programme
                         prog = ET.Element("programme", start=start_str, channel=epg_id)
@@ -541,15 +545,16 @@ class EPGMerger:
                         
                         # Opis
                         desc_text = details.get("desc", "")
-                        if desc_text: ET.SubElement(prog, "desc", lang="pl").text = clean_xml_text(desc_text)
+                        if desc_text: 
+                            ET.SubElement(prog, "desc", lang="pl").text = clean_xml_text(desc_text)
                         
                         # Obsada (Credits)
                         actors = details.get("actors", [])
                         directors = details.get("directors", [])
                         if actors or directors:
                             credits_el = ET.SubElement(prog, "credits")
-                            for d in directors:
-                                ET.SubElement(credits_el, "director").text = clean_xml_text(d)
+                            for dr in directors:
+                                ET.SubElement(credits_el, "director").text = clean_xml_text(dr)
                             for a in actors:
                                 ET.SubElement(credits_el, "actor").text = clean_xml_text(a)
 
@@ -599,6 +604,8 @@ class EPGMerger:
                         self.stats["errors"] += 1
                         continue
 
+                    # TO NAPRAWIA KRZACZKI: Wymuszenie dekodowania UTF-8 dla Interii
+                    r.encoding = 'utf-8'
                     soup = BeautifulSoup(r.text, 'lxml')
                     items = soup.find_all('div', class_='item-wrap')
                     prog_count = 0
@@ -617,18 +624,19 @@ class EPGMerger:
                             continue
 
                         title_a = item.find('a', class_='title')
-                        title_text = clean_xml_text(title_a.get('title'))
+                        title_text = clean_xml_text(title_a.get_text(strip=True))
                         
                         prog = ET.Element("programme", start=start_str, channel=epg_id)
                         ET.SubElement(prog, "title", lang="pl").text = title_text
                         
                         if is_detailed:
-                            # Proste pobieranie szczegółów z Interii (tekst i ewentualnie kategoria)
                             detail_url = title_a.get('href')
                             if detail_url:
                                 full_url = detail_url if detail_url.startswith('http') else f"https://programtv.interia.pl{detail_url}"
                                 try:
                                     det_r = requests.get(full_url, headers=HEADERS, timeout=10)
+                                    # Tu również dbamy o poprawne kodowanie podstrony ze szczegółami
+                                    det_r.encoding = 'utf-8'
                                     det_s = BeautifulSoup(det_r.text, 'lxml')
                                     div = det_s.find('div', id='intertext1')
                                     if div:
@@ -636,7 +644,6 @@ class EPGMerger:
                                         if type_strong:
                                             first_word = type_strong.find('span', class_='first-word')
                                             if first_word:
-                                                # Usuń nawiasy jeśli są w tekście (np. "(mistrzostwa)")
                                                 cat_text = first_word.get_text(strip=True).strip('()')
                                                 ET.SubElement(prog, "category", lang="pl").text = clean_xml_text(cat_text)
                                             type_strong.decompose()
@@ -645,7 +652,7 @@ class EPGMerger:
                                         if desc_text:
                                             ET.SubElement(prog, "desc", lang="pl").text = clean_xml_text(desc_text)
                                 except Exception as e:
-                                    pass # Cicha porażka dla pojedynczego detalu
+                                    pass
 
                         results.append(prog)
                         self.added_events[(epg_id, start_str)] = is_detailed
