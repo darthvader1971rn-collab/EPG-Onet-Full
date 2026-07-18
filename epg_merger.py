@@ -84,6 +84,7 @@ CHANNELS = {
     "DORCEL TV HD": ("dorcel-tv-hd-660", "onet", "DorcelTVHD.pl"),
     "DTX HD": ("discovery-turbo-xtra-hd-189", "onet", "DTXHD.pl"),
     "E! Entertainment": ("e-entertainment-hd-169", "onet", "E!EntertainmentHD.pl"),
+    "Eleven Sports 1 4K": ("eleven-hd-227", "onet", "ElevenSports1_4K.pl"),
     "Eleven Sports 1 HD": ("eleven-hd-227", "onet", "ElevenSports1HD.pl"),
     "Eleven Sports 2 HD": ("eleven-hd-sports-228", "onet", "ElevenSports2HD.pl"),
     "Eleven Sports 3 HD": ("eleven-extra-hd-534", "onet", "ElevenSports3HD.pl"),
