@@ -768,9 +768,7 @@ class EPGMerger:
         logging.info("="*50)
 
     def save(self):
-        limit_zgemma = (self.now + timedelta(days=7)).strftime("%Y%m%d%H%M%S")
-        
-        def build(filter_z=False):
+        def build():
             root = ET.Element("tv", {
                 "generator-info-name": "EPG-Hybrid-Grabber", 
                 "generator-info-url": "https://epg.ovh"
@@ -826,8 +824,6 @@ class EPGMerger:
                         
             # Dodawanie audycji do struktury
             for p in self.all_programmes:
-                if filter_z and p.get("start")[:14] > limit_zgemma: 
-                    continue
                 root.append(p)
                 
             # Formatowanie estetyczne drzewa XML
@@ -843,13 +839,10 @@ class EPGMerger:
             
             return xml_str.encode('utf-8')
 
-        logging.info("Zapisywanie plików EPG do archiwum...")
+        logging.info("Zapisywanie głównego pliku EPG do archiwum...")
         
         with gzip.open(FILE_RECORDER, 'wb') as f: 
-            f.write(build(False))
-            
-        with gzip.open(FILE_ZGEMMA, 'wb') as f: 
-            f.write(build(True))
+            f.write(build())
             
         logging.info("Zapis zakończony sukcesem!")
 
