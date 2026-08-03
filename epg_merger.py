@@ -378,7 +378,7 @@ class EPGMerger:
         logging.info("--- START NOWEJ SESJI EPG ---")
 
     def load_history(self):
-        """Wczytuje historię i informuje o postępach[cite: 1]."""
+        """Wczytuje historię i informuje o postępach."""
         if not os.path.exists(FILE_RECORDER): 
             logging.info("Brak pliku historii. Rozpoczynam od zera.")
             return False
@@ -705,8 +705,7 @@ class EPGMerger:
         EXTERNAL_SOURCES = [
             OVH_URL, 
             OTOPAY_URL,
-            "https://raw.githubusercontent.com/darthvader1971rn-collab/EPG-Onet-Full/main/Output/epg_recorder.xml.gz",
-            "https://raw.githubusercontent.com/darthvader1971rn-collab/EPG-Onet-Full/main/Output/epg_zgemma.xml.gz"
+            "https://github.com/darthvader1971rn-collab/EPG-Onet-Full/releases/download/latest/epg_recorder.xml.gz"
         ]
         
         logging.info(f"Sprawdzanie źródeł zewnętrznych ({len(EXTERNAL_SOURCES)} źródeł)...")
@@ -900,8 +899,8 @@ if __name__ == "__main__":
     if "--auto" in sys.argv:
         m = EPGMerger()
         m.load_history()
-        # GitHub (Tryb auto): Zgodnie z wytycznymi, na serwerze wystarczy tylko 1 i 12 (pełne)
-        m.run(selected_days=[2, 3, 4, 5, 6, 7, 8, 9, 10, 11], detailed_days=[2, 3, 4, 5, 6, 7, 8, 9, 10, 11])
+        # GitHub (Tryb auto): Zgodnie z wytycznymi, na serwerze wystarczy tylko 0, 1 i 12 (pełne)
+        m.run(selected_days=[0, 1, 12], detailed_days=[0, 1, 12])
         m.save()
     else:
         start_gui()
