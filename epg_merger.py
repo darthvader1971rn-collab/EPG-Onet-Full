@@ -697,9 +697,13 @@ class EPGMerger:
             for f in concurrent.futures.as_completed(futures):
                 self.all_programmes.extend(f.result())
 
-        # Zabezpieczenie Fallback (Dla Interii i kanałów XML)
-        # my_epg_ids to wszystkie unikalne ID (trzeci parametr), do których chcemy przypisać EPG
-        my_epg_ids = {v[2] for v in CHANNELS.values()}
+        # Tworzymy słownik do mapowania ID z plików XML na nasze własne docelowe ID (epg_id)
+        # Dzięki temu np. zewnętrzny "Skyshowtime 1" zostanie przypisany do naszego "SkyShowtime1.pl"
+        xml_id_map = {}
+        for name, (ident, src, epg_id) in CHANNELS.items():
+            xml_id_map[epg_id] = epg_id # Mapowanie podstawowe (jeśli zewn. ID jest już takie samo jak nasze)
+            if src == 'xml':
+                xml_id_map[ident] = epg_id # Mapowanie awaryjne (dopasowanie po pierwszej zmiennej z listy)
 
         # 2. Uzupełnianie z zewnętrznych list XML (Normalizator / Fallback)
         EXTERNAL_SOURCES = [
@@ -728,15 +732,17 @@ class EPGMerger:
                     continue
 
                 for p in ext_xml.findall("programme"):
-                    cid = p.get("channel")
+                    raw_cid = p.get("channel")
                     start = p.get("start")
                     
+                    # Tłumaczymy ID z pliku zewnętrznego na nasze (zwróci None, jeśli nas to ID nie interesuje)
+                    target_epg_id = xml_id_map.get(raw_cid)
+                    
                     # LOGIKA FALLBACK / NORMALIZATORA
-                    # Sprawdzamy czy:
-                    # 1. Pobrany kanał jest na naszej liście (cid in my_epg_ids)
-                    # 2. Nie mamy jeszcze audycji o tej godzinie dla tego kanału (!in added_events)
-                    # To ratuje nas, gdy Interia dla Eurosportu np. wyrzuci błąd i nie doda eventów.
-                    if cid and start and cid in my_epg_ids and (cid, start) not in self.added_events:
+                    if target_epg_id and start and (target_epg_id, start) not in self.added_events:
+                        
+                        # Nadpisujemy w tagu XML stare ID na nasze nowo przetłumaczone ID
+                        p.set("channel", target_epg_id)
                         
                         # NORMALIZACJA: Wymuszamy dodanie języka "pl" dla zgodności z formatem OVH
                         for tag in ['title', 'desc', 'category']:
@@ -745,8 +751,8 @@ class EPGMerger:
                                 el.set('lang', 'pl')
                                 
                         self.all_programmes.append(p)
-                        # Oznaczamy, że dodaliśmy EPG, więc kolejne pliki XML nie nadpiszą już tej audycji
-                        self.added_events[(cid, start)] = p.find("desc") is not None
+                        # Oznaczamy, że dodaliśmy EPG dla naszego ID, więc kolejne pliki tego nie nadpiszą
+                        self.added_events[(target_epg_id, start)] = p.find("desc") is not None
                         xml_added += 1
                         
             except Exception as e:
