@@ -349,6 +349,7 @@ CHANNELS = {
     "Viaplay Sports 1": ("Viaplay Sports 1", "xml", "ViaplaySports1.pl"),
     "Viaplay Sports 2": ("Viaplay Sports 2", "xml", "ViaplaySports2.pl"),
     "Viasat True Crime": ("Viasat True Crime", "xml", "ViasatTrueCrime.pl"),
+    "TOP Movies Rakuten": ("top-movies-rakuten-tv", "xml", "TOPMoviesRakuten.pl"),
 }
 
 def clean_xml_text(text):
@@ -709,6 +710,7 @@ class EPGMerger:
         EXTERNAL_SOURCES = [
             OVH_URL, 
             OTOPAY_URL,
+            "https://raw.githubusercontent.com/RadziuOi/rakuten-pl-epg/master/epg.xml",
             "https://github.com/darthvader1971rn-collab/EPG-Onet-Full/releases/download/latest/epg_recorder.xml.gz"
         ]
         
