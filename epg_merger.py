@@ -283,6 +283,8 @@ CHANNELS = {
     "Duck TV Plus": ("DuckTV Plus", "xml", "DuckTVPlus.pl"),
     "Echo24": ("TV echo 24", "xml", "Echo24.pl"),
     "eSports One HD": ("eSports One HD", "xml", "eSportsOneHD.pl"),
+    "Eurosport 3": ("Eurosport 3", "xml", "Eurosport3.pl"),
+    "Eurosport 4": ("Eurosport 4", "xml", "Eurosport4.pl"),
     "Extreme Sports HD": ("Extreme Sports Channel", "xml", "ExtremeSportsHD.pl"),
     "Fast FunBox": ("fast-n-funbox-hd", "xml", "FastFunBox.pl"),
     "Fight Sports HD": ("Fight Sports HD", "xml", "FightSportsHD.pl"),
@@ -350,6 +352,52 @@ CHANNELS = {
     "Viaplay Sports 2": ("Viaplay Sports 2", "xml", "ViaplaySports2.pl"),
     "Viasat True Crime": ("Viasat True Crime", "xml", "ViasatTrueCrime.pl"),
     "TOP Movies Rakuten": ("top-movies-rakuten-tv", "xml", "TOPMoviesRakuten.pl"),
+    
+    # --- NOWE KANAŁY Z OTOPAY (Informacyjne, zagraniczne i tematyczne) ---
+    "TV Republika": ("Republika", "xml", "TVRepublika.pl"),
+    "News24": ("News24", "xml", "News24.pl"),
+    "Sejm RP": ("Sejm RP", "xml", "SejmRP.pl"),
+    "Bloomberg": ("Bloomberg", "xml", "Bloomberg.pl"),
+    "Newsmax Polska": ("Newsmax Polska", "xml", "NewsmaxPolska.pl"),
+    "Canal+ Sport 6": ("Canal+ Sport 6", "xml", "Canal+Sport6.pl"),
+    "Canal+ Sport 7": ("Canal+ Sport 7", "xml", "Canal+Sport7.pl"),
+    "Remonty TV": ("Remonty TV", "xml", "RemontyTV.pl"),
+
+    # --- KANAŁY ZAGRANICZNE / NEWSOWE ---
+    "CNN": ("CNN", "xml", "CNN.pl"),
+    "CNBC": ("CNBC", "xml", "CNBC.pl"),
+    "DW": ("DW", "xml", "DW.pl"),
+    "Fox News": ("Fox News", "xml", "FoxNews.pl"),
+    "BBC World News": ("BBC World News", "xml", "BBCWorldNews.pl"),
+    "Belsat TV": ("Belsat TV", "xml", "BelsatTV.pl"),
+    "1+1 International": ("1+1 International", "xml", "1plus1International.pl"),
+    "Espreso TV": ("Espreso TV HD", "xml", "EspresoTV.pl"),
+    "Ukraine 24": ("Ukraina 24", "xml", "Ukraine24.pl"),
+    "Inter HD": ("inter", "xml", "InterHD.pl"),
+
+    # --- KANAŁY OKOLICZNOŚCIOWE I KOLEKCJE VOD (TVN / TVP) ---
+    "TVN Seriale o Kobietach": ("TVN Seriale o Kobietach Online", "xml", "TVNSerialeOKobietach.pl"),
+    "TVN Mam Talent": ("TVN Mam Talent Online", "xml", "TVNMamTalent.pl"),
+    "TVN Brzydula": ("TVN Brzydula Online", "xml", "TVNBrzydula.pl"),
+    "TVP Klan": ("TVP Klan", "xml", "TVPKlan.pl"),
+    "TVP Kryminały": ("TVP Kryminaly", "xml", "TVPKryminaly.pl"),
+    "TVP Barwy szczęścia": ("TVP Barwy Szczescia", "xml", "TVPBarwySzczescia.pl"),
+    "TVP Miłość": ("TVP Milosc", "xml", "TVPMilosc.pl"),
+    "TVP Muzyka i Koncerty": ("TVP Muzyka i Koncerty", "xml", "TVPMuzykaIKoncerty.pl"),
+
+    # --- STACJE RADIOWE ---
+    # W głównym skrypcie widnieje notatka, że jest to "wersja zoptymalizowana bez stacji radiowych", 
+    # ale w bazie Otopay one się znajdują. Zostawiam je zakomentowane - odkomentuj, jeśli chcesz je pobierać:
+    # "Antyradio": ("RADIO_PL_ANTYRADIO", "xml", "Antyradio.pl"),
+    # "Chillizet": ("RADIO_PL_CHILLIZET", "xml", "Chillizet.pl"),
+    # "Radio ZET": ("RADIO_PL_RADIOZET", "xml", "RadioZET.pl"),
+    # "RMF FM": ("RADIO_PL_RMF", "xml", "RMFFM.pl"),
+    # "RMF Classic": ("RADIO_PL_RMF_CLASSIC", "xml", "RMFClassic.pl"),
+    # "RMF MAXXX": ("RADIO_PL_RMF_MAXXX", "xml", "RMFMaxxx.pl"),
+    # "Radio Złote Przeboje": ("RADIO_PL_ZLOTE_PRZEBOJE", "xml", "ZlotePrzeboje.pl"),
+    # "Radio Nowy Świat": ("Radio Nowy Swiat", "xml", "RadioNowySwiat.pl"),
+    # "Radio 357": ("Radio 357", "xml", "Radio357.pl"),
+    # "Radio Eska": ("ESKA", "xml", "RadioEska.pl"),
 }
 
 def clean_xml_text(text):
