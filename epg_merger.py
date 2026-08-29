@@ -432,7 +432,8 @@ class EPGMerger:
             logging.info("Brak pliku historii. Rozpoczynam od zera.")
             return False
             
-        limit = self.now - timedelta(hours=96)
+        # Zmiana bufora archiwum z 96h (4 dni) na 168h (7 dni) pod catchup PlayNow
+        limit = self.now - timedelta(hours=168)
         try:
             with gzip.open(FILE_RECORDER, 'rb') as f:
                 tree = ET.parse(f)
@@ -446,7 +447,7 @@ class EPGMerger:
                         self.all_programmes.append(prog)
                         self.added_events[(ch_id, start)] = has_desc
                         count += 1
-                logging.info(f"Wczytano {count} audycji z historii (Catchup -96h).")
+                logging.info(f"Wczytano {count} audycji z historii (Catchup -168h / 7 dni).")
             return True
         except Exception as e: 
             logging.error(f"Błąd analizy bazy: {e}")
@@ -830,47 +831,24 @@ class EPGMerger:
             })
             
             # --- GENERATOR ALIASÓW (Super Matching System) ---
-            # Buduje dziesiątki różnych wariantów nazw dla jednego kanału,
-            # aby aplikacje IPTV zawsze mogły dopasować EPG do listy M3U.
             for name, (_, _, eid) in CHANNELS.items():
                 ch = ET.SubElement(root, "channel", id=eid)
                 
-                # Słownik do przechowywania unikalnych, sformatowanych nazw
                 unique_names = set()
-                
-                # Wzorce do generowania (Na podstawie logiki OVH)
                 patterns = [
-                    "{base}",
-                    "PL: {base}",
-                    "PL: {base} HD",
-                    "PL: {base} FHD",
-                    "PL| {base}",
-                    "PL| {base} HD",
-                    "{base} PL",
-                    "{base} HD PL",
-                    "{base} FHD PL",
-                    "{base} HD",
-                    "{base} FHD",
-                    "{base} sd",
-                    "{base} [PL]"
+                    "{base}", "PL: {base}", "PL: {base} HD", "PL: {base} FHD", 
+                    "PL| {base}", "PL| {base} HD", "{base} PL", "{base} HD PL", 
+                    "{base} FHD PL", "{base} HD", "{base} FHD", "{base} sd", "{base} [PL]"
                 ]
                 
-                # Funkcja czyszcząca nazwę z dopisków jakości przed generowaniem
-                # (żeby z "Polsat HD" nie zrobić "Polsat HD HD")
                 clean_base = re.sub(r'(?i)\s+(HD|FHD|4K|UHD|SD)$', '', name).strip()
                 
-                # Generujemy wszystkie kombinacje
                 for pattern in patterns:
-                    # Dodajemy wariant z czystą nazwą (np. "Polsat HD" -> "PL: Polsat HD")
                     unique_names.add(pattern.format(base=clean_base))
                 
-                # Dodajemy do XML unikalne warianty wygenerowane z szablonów
                 for display_name in sorted(unique_names):
                     ET.SubElement(ch, "display-name", lang="pl").text = display_name
                 
-                # Wymuszamy dodanie oryginalnej nazwy ze słownika, jeśli nie ma jej na liście
-                # i dodajemy unikalne ID dostawcy EPG (np. "Alekino+HD.pl"),
-                # na którym często bazują aplikacje typu Smart IPTV.
                 custom_names = [name, eid]
                 for custom_name in custom_names:
                     if custom_name not in unique_names:
@@ -881,25 +859,216 @@ class EPGMerger:
             for p in self.all_programmes:
                 root.append(p)
                 
-            # Formatowanie estetyczne drzewa XML
             if hasattr(ET, "indent"):
                 ET.indent(root)
                 
-            # Generowanie stringa XML
             xml_bytes = ET.tostring(root, encoding='utf-8', xml_declaration=True)
             xml_str = xml_bytes.decode('utf-8')
-            
-            # Wstrzykiwanie DOCTYPE w standardzie OVH (XMLTV)
             xml_str = xml_str.replace("?>", "?>\n<!DOCTYPE tv SYSTEM \"xmltv.dtd\">", 1)
             
-            return xml_str.encode('utf-8')
+            return xml_str
 
-        logging.info("Zapisywanie głównego pliku EPG do archiwum...")
+        logging.info("Rozpoczynam budowanie struktury XML...")
+        xml_base_str = build()
         
+        # 1. Zapis standardowego pliku (np. dla Zgemmy / Smart IPTV)
+        logging.info("Zapisywanie głównego pliku EPG (epg_recorder.xml.gz)...")
         with gzip.open(FILE_RECORDER, 'wb') as f: 
-            f.write(build())
+            f.write(xml_base_str.encode('utf-8'))
             
-        logging.info("Zapis zakończony sukcesem!")
+        # 2. Generowanie drugiego pliku EPG dla PlayNow
+        logging.info("Tłumaczenie tagów i zapisywanie EPG dla PlayNow (epg_playnow.xml.gz)...")
+        
+        # Automatyczne budowanie słownika tłumaczącego dla WSZYSTKICH kanałów
+        playnow_map = {}
+        for name, (_, _, epg_id) in CHANNELS.items():
+            # Standardowo jako tvg-id przyjmujemy główną, czystą nazwę kanału (bez .pl)
+            # Dzięki temu automatycznie zmapują się poprawnie stacje takie jak "CANAL+ 1 HD" czy "HBO HD"
+            playnow_map[epg_id] = name
+            
+        # Nadpisujemy ręcznie wyjątki, które na liście PlayNow miały specyficzne nazwy
+        playnow_exceptions = {
+            "13UlicaHD.pl": "13 Ulica",
+            "4FUNDANCE.pl": "4FUN Dance",
+            "4FUNKIDS.pl": "4FUN Kids",
+            "4FUN.TV.pl": "4FUN TV",
+            "Alekino+HD.pl": "Ale Kino+",
+            "AlfaTVP.pl": "ALFA TVP",
+            "AMCHD.pl": "AMC",
+            "Antena.pl": "Antena HD",
+            "AXNBlack.pl": "AXN Black",
+            "AXNHD.pl": "AXN",
+            "AXNSpinHD.pl": "AXN Spin",
+            "AXNWhite.pl": "AXN White",
+            "ActiveFamilyHD.pl": "Active Family",
+            "BabyTV.pl": "Baby TV",
+            "BBCFirst.pl": "BBC First",
+            "BBCLifestyleHD.pl": "BBC Lifestyle",
+            "Biznes24HD.pl": "Biznes24",
+            "BollywoodHD.pl": "Bollywood",
+            "CANAL+Sport5HD.pl": "CANAL+ Sport 5",
+            "CartoonNetworkHD.pl": "Cartoon Network",
+            "CartoonitoHD.pl": "Cartoonito",
+            "ComedyCentralHD.pl": "Comedy Central",
+            "DaVinciHD.pl": "Da Vinci",
+            "DiscoPoloMusic.pl": "Disco Polo Music",
+            "DiscoveryChannel.pl": "Discovery Channel HD",
+            "DiscoveryLifeHD.pl": "Discovery Life HD",
+            "DisneyChannelHD.pl": "Disney Channel",
+            "DisneyJunior.pl": "Disney Junior",
+            "DisneyXD.pl": "Disney XD",
+            "DTXHD.pl": "DTX HD",
+            "ElevenSports1HD.pl": "Eleven Sports 1",
+            "ElevenSports2HD.pl": "Eleven Sports 2",
+            "ElevenSports3HD.pl": "Eleven Sports 3",
+            "ElevenSports4HD.pl": "Eleven Sports 4",
+            "EskaRockTV.pl": "Eska Rock TV",
+            "EskaTVHD.pl": "Eska TV",
+            "EskaTVExtra.pl": "Eska TV Extra",
+            "Eurosport1.pl": "Eurosport 1 HD",
+            "FILMAX.pl": "Filmax",
+            "KinoTVHD.pl": "FILMBOX+ One",
+            "FokusTVHD.pl": "Fokus TV",
+            "FoodNetworkHD.pl": "Food Network HD ",
+            "FXComedyHD.pl": "FX Comedy HD",
+            "FXHD.pl": "FX HD",
+            "GametoonHD.pl": "Gametoon",
+            "HGTVHD.pl": "HGTV HD",
+            "HOMETVHD.pl": "HOME TV HD",
+            "HISTORYHD.pl": "HISTORY",
+            "IDHD.pl": "ID HD",
+            "JuniorMusicHD.pl": "JUNIOR MUSIC HD",
+            "KabaretTV.pl": "Kabaret TV",
+            "KinoPolskaHD.pl": "Kino Polska",
+            "KinoPolskaMuzyka.pl": "Kino Polska Muzyka",
+            "METROHD.pl": "METRO HD",
+            "MiniMini+HD.pl": "MiniMini+",
+            "MusicBoxHD.pl": "Music Box Polska",
+            "NatGeoPeopleHD.pl": "Nat Geo People HD",
+            "NationalGeographicHD.pl": "National Geographic",
+            "NationalGeographicWildHD.pl": "Nat Geo Wild",
+            "NickJr.HD.pl": "Nick Jr.",
+            "Nickelodeon.pl": "Nickelodeon",
+            "NicktoonsHD.pl": "NickToons",
+            "Novelas+.pl": "NOVELAS+",
+            "NowaTVHD.pl": "Nowa TV",
+            "NutaGold.pl": "Nuta Gold",
+            "ParamountNetwork.pl": "Paramount Network",
+            "PoloTV.pl": "Polo TV",
+            "Polonia1.pl": "Polonia1",
+            "PolsatHD.pl": "Polsat",
+            "Polsat2HD.pl": "POLSAT 2",
+            "PolsatCaféHD.pl": "POLSAT Cafe",
+            "PolsatComedyCentralExtraHD.pl": "Polsat Comedy Central Extra",
+            "PolsatDokuHD.pl": "POLSAT Doku",
+            "PolsatFilmHD.pl": "POLSAT Film",
+            "PolsatGamesHD.pl": "POLSAT Games",
+            "PolsatJimJam.pl": "POLSAT JimJam",
+            "PolsatMusicHD.pl": "POLSAT Music",
+            "PolsatNewsHD.pl": "POLSAT News",
+            "PolsatNews2HD.pl": "POLSAT News 2",
+            "PolsatNewsPolityka.pl": "Polsat News Polityka",
+            "PolsatPlayHD.pl": "POLSAT Play",
+            "PolsatRodzinaHD.pl": "POLSAT Rodzina",
+            "PolsatSeriale.pl": "POLSAT Seriale",
+            "PolsatSport1HD.pl": "Polsat Sport 1",
+            "PolsatSport2HD.pl": "Polsat Sport 2",
+            "PolsatSport3HD.pl": "Polsat Sport 3",
+            "PolsatSportFightHD.pl": "POLSAT Sport Fight",
+            "PowerTVHD.pl": "Power TV HD",
+            "PULS2HD.pl": "Puls 2",
+            "RomanceTVHD.pl": "Romance.TV",
+            "STARS.TVHD.pl": "Stars.TV",
+            "STOPKLATKAHD.pl": "Stopklatka TV",
+            "StudioMEDTV.pl": "STUDIOMED TV",
+            "SundanceTVHD.pl": "Sundance TV",
+            "SuperPolsatHD.pl": "Super POLSAT",
+            "TBNPolskaHD.pl": "TBN Polska",
+            "Tele5.pl": "Tele5",
+            "teleTOON+HD.pl": "teleTOON+",
+            "TLCHD.pl": "TLC HD",
+            "TopKidsHD.pl": "TOP KIDS",
+            "TravelChannelHD.pl": "Travel Channel HD",
+            "TTVHD.pl": "TTV HD",
+            "TV4.pl": "TV4",
+            "TV6.pl": "TV 6",
+            "TVPulsHD.pl": "TV Puls",
+            "TVTrwam.pl": "TV Trwam",
+            "TVC.pl": "TVC HD",
+            "TVNHD.pl": "TVN",
+            "TVN24HD.pl": "TVN24",
+            "TVN24BiSHD.pl": "TVN24 BIS",
+            "TVN7HD.pl": "TVN 7 HD",
+            "TVNFabułaHD.pl": "TVN Fabuła HD",
+            "TVNStyleHD.pl": "TVN Style HD",
+            "TVNTurboHD.pl": "TVN Turbo HD",
+            "TVP1HD.pl": "TVP1",
+            "TVP2HD.pl": "TVP2",
+            "TVP3Bialystok.pl": "TVP3 Białystok",
+            "TVPInfoHD.pl": "TVP Info",
+            "TVPWorld.pl": "TVP World",
+            "TVSHD.pl": "TVS",
+            "TVT.pl": "TVT",
+            "TeenNick.pl": "TeenNick",
+            "EpicDramaHD.pl": "Viasat Epic Drama",
+            "ViDocTV.pl": "ViDoc TV",
+            "VOXMusicTV.pl": "VOX Music TV",
+            "WPHD.pl": "WP HD",
+            "wPolsce24HD.pl": "wPolsce24",
+            "WarnerTVHD.pl": "Warner TV",
+            "Wydarzenia24HD.pl": "Wydarzenia24",
+            "ZOOMTVHD.pl": "ZOOM",
+            "TVN_SD.pl": "TVN",
+            "TVN 7 HD_SD.pl": "TVN 7 HD",
+            "TVN24_SD.pl": "TVN24",
+            "TV4_SD.pl": "TV4",
+            "TV6_SD.pl": "TV 6",
+            "TTV_SD.pl": "TTV HD",
+            "Puls 2_SD.pl": "Puls 2",
+            "TV Puls_SD.pl": "TV Puls",
+            "Polsat_SD.pl": "Polsat",
+            "DlaCiebieTV.pl": "DlaCiebie. TV",
+            "DuckTV.pl": "Duck TV",
+            "Echo24.pl": "ECHO24",
+            "MixTapeHD.pl": "Mixtape TV",
+            "NutaTV.pl": "Nuta. TV HD",
+            "PolsatFilm2HD.pl": "Polsat Film 2",
+            "PolsatRealityHD.pl": "Polsat Reality",
+            "PolsatXHD.pl": "Polsat X",
+            "SciFi.pl": "SCI FI",
+            "TVCSuper.pl": "TVC Super",
+            "ViasatTrueCrime.pl": "Viasat True Crime",
+            "TVRepublika.pl": "TV Republika HD",
+            "News24.pl": "News24",
+            "Bloomberg.pl": "Bloomberg Television",
+            "NewsmaxPolska.pl": "Newsmax Polska",
+            "CNN.pl": "CNN",
+            "DW.pl": "Deutsche Welle ENG",
+            "BBCWorldNews.pl": "BBC News",
+            "Chillizet.pl": "Chillizet",
+            "RMFFM.pl": "RMF FM",
+            "RMFClassic.pl": "RMF Classic",
+            "RMFMaxxx.pl": "RMF MAXXX",
+            "RadioNowySwiat.pl": "Radio Nowy Świat",
+            "Radio357.pl": "Radio 357",
+            "RadioEska.pl": "Radio Eska"
+        }
+        
+        # Aktualizujemy główny słownik o nasze wyjątki
+        playnow_map.update(playnow_exceptions)
+        
+        # Zastępujemy wszystkie identyfikatory w locie
+        xml_playnow_str = xml_base_str
+        for orig_id, play_id in playnow_map.items():
+            # Dzięki cudzysłowom wymieniamy tylko precyzyjne atrybuty id="", 
+            # bez ryzyka uszkodzenia przypadkowych słów w opisach audycji
+            xml_playnow_str = xml_playnow_str.replace(f'"{orig_id}"', f'"{play_id}"')
+            
+        file_playnow = os.path.join(OUTPUT_DIR, "epg_playnow.xml.gz")
+        with gzip.open(file_playnow, 'wb') as f:
+            f.write(xml_playnow_str.encode('utf-8'))
+            
+        logging.info("Podwójny zapis zakończony sukcesem!")
 
     def format_time(self, dt):
         return dt.strftime("%Y%m%d%H%M00 +0100")
