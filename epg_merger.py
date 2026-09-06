@@ -16,7 +16,6 @@ import logging
 # --- KONFIGURACJA ---
 OUTPUT_DIR = "Output"
 FILE_RECORDER = os.path.join(OUTPUT_DIR, "epg_recorder.xml.gz")
-FILE_ZGEMMA = os.path.join(OUTPUT_DIR, "epg_zgemma.xml.gz")
 OVH_URL = "https://epg.ovh/plar.gz"
 OTOPAY_URL = "https://iptv.otopay.io/guide.xml"
 HEADERS = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36'}
@@ -748,12 +747,11 @@ class EPGMerger:
                 self.all_programmes.extend(f.result())
 
         # Tworzymy słownik do mapowania ID z plików XML na nasze własne docelowe ID (epg_id)
-        # Dzięki temu np. zewnętrzny "Skyshowtime 1" zostanie przypisany do naszego "SkyShowtime1.pl"
         xml_id_map = {}
         for name, (ident, src, epg_id) in CHANNELS.items():
-            xml_id_map[epg_id] = epg_id # Mapowanie podstawowe (jeśli zewn. ID jest już takie samo jak nasze)
+            xml_id_map[epg_id] = epg_id
             if src == 'xml':
-                xml_id_map[ident] = epg_id # Mapowanie awaryjne (dopasowanie po pierwszej zmiennej z listy)
+                xml_id_map[ident] = epg_id
 
         # 2. Uzupełnianie z zewnętrznych list XML (Normalizator / Fallback)
         EXTERNAL_SOURCES = [
@@ -765,6 +763,9 @@ class EPGMerger:
         
         logging.info(f"Sprawdzanie źródeł zewnętrznych ({len(EXTERNAL_SOURCES)} źródeł)...")
         xml_added = 0
+        
+        # Dynamiczny limit czasowy: odrzucamy wszystko starsze niż 7 dni (168h)
+        limit_dt = self.now - timedelta(hours=168)
         
         for idx, url in enumerate(EXTERNAL_SOURCES, 1):
             try:
@@ -786,25 +787,30 @@ class EPGMerger:
                     raw_cid = p.get("channel")
                     start = p.get("start")
                     
-                    # Tłumaczymy ID z pliku zewnętrznego na nasze (zwróci None, jeśli nas to ID nie interesuje)
                     target_epg_id = xml_id_map.get(raw_cid)
                     
-                    # LOGIKA FALLBACK / NORMALIZATORA
-                    if target_epg_id and start and (target_epg_id, start) not in self.added_events:
-                        
-                        # Nadpisujemy w tagu XML stare ID na nasze nowo przetłumaczone ID
-                        p.set("channel", target_epg_id)
-                        
-                        # NORMALIZACJA: Wymuszamy dodanie języka "pl" dla zgodności z formatem OVH
-                        for tag in ['title', 'desc', 'category']:
-                            el = p.find(tag)
-                            if el is not None and not el.get('lang'):
-                                el.set('lang', 'pl')
-                                
-                        self.all_programmes.append(p)
-                        # Oznaczamy, że dodaliśmy EPG dla naszego ID, więc kolejne pliki tego nie nadpiszą
-                        self.added_events[(target_epg_id, start)] = p.find("desc") is not None
-                        xml_added += 1
+                    if target_epg_id and start:
+                        # Walidacja daty (odfiltrowanie starych śmieci)
+                        try:
+                            st_str = start[:14] # Wyciągamy pierwsze 14 znaków, czyli np. "20260916020000"
+                            st_dt = datetime.strptime(st_str, "%Y%m%d%H%M%S").replace(tzinfo=TZ)
+                            if st_dt < limit_dt:
+                                continue # Ignorujemy starą audycję i przechodzimy do kolejnej
+                        except Exception:
+                            pass # W razie błędu parsowania (uszkodzony atrybut start w źródle), przepuszczamy dalej
+                            
+                        # Logika Fallback / Normalizatora
+                        if (target_epg_id, start) not in self.added_events:
+                            p.set("channel", target_epg_id)
+                            
+                            for tag in ['title', 'desc', 'category']:
+                                el = p.find(tag)
+                                if el is not None and not el.get('lang'):
+                                    el.set('lang', 'pl')
+                                    
+                            self.all_programmes.append(p)
+                            self.added_events[(target_epg_id, start)] = p.find("desc") is not None
+                            xml_added += 1
                         
             except Exception as e:
                 import traceback
@@ -824,7 +830,7 @@ class EPGMerger:
         logging.info("="*50)
 
     def save(self):
-        def build():
+        def build(history_hours):
             root = ET.Element("tv", {
                 "generator-info-name": "EPG-Hybrid-Grabber", 
                 "generator-info-url": "https://epg.ovh"
@@ -855,9 +861,19 @@ class EPGMerger:
                         ET.SubElement(ch, "display-name", lang="pl").text = custom_name
                         unique_names.add(custom_name)
                         
-            # Dodawanie audycji do struktury
+            # Dodawanie audycji z uwzględnieniem podanego bufora historii
+            limit_dt = self.now - timedelta(hours=history_hours)
             for p in self.all_programmes:
-                root.append(p)
+                start_str = p.get("start")
+                if start_str:
+                    try:
+                        st_dt = datetime.strptime(start_str[:14], "%Y%m%d%H%M%S").replace(tzinfo=TZ)
+                        if st_dt >= limit_dt:
+                            root.append(p)
+                    except Exception:
+                        root.append(p)
+                else:
+                    root.append(p)
                 
             if hasattr(ET, "indent"):
                 ET.indent(root)
@@ -869,21 +885,20 @@ class EPGMerger:
             return xml_str
 
         logging.info("Rozpoczynam budowanie struktury XML...")
-        xml_base_str = build()
         
-        # 1. Zapis standardowego pliku (np. dla Zgemmy / Smart IPTV)
-        logging.info("Zapisywanie głównego pliku EPG (epg_recorder.xml.gz)...")
+        # 1. Zapis standardowego pliku (4 dni historii dla recordera)
+        logging.info("Budowanie pliku z 4-dniowym archiwum (epg_recorder.xml.gz)...")
+        xml_recorder_str = build(96)
         with gzip.open(FILE_RECORDER, 'wb') as f: 
-            f.write(xml_base_str.encode('utf-8'))
+            f.write(xml_recorder_str.encode('utf-8'))
             
-        # 2. Generowanie drugiego pliku EPG dla PlayNow
-        logging.info("Tłumaczenie tagów i zapisywanie EPG dla PlayNow (epg_playnow.xml.gz)...")
+        # 2. Generowanie drugiego pliku EPG dla PlayNow (7 dni historii)
+        logging.info("Budowanie pliku z 7-dniowym archiwum i tłumaczenie tagów dla PlayNow (epg_playnow.xml.gz)...")
+        xml_playnow_str = build(168)
         
         # Automatyczne budowanie słownika tłumaczącego dla WSZYSTKICH kanałów
         playnow_map = {}
         for name, (_, _, epg_id) in CHANNELS.items():
-            # Standardowo jako tvg-id przyjmujemy główną, czystą nazwę kanału (bez .pl)
-            # Dzięki temu automatycznie zmapują się poprawnie stacje takie jak "CANAL+ 1 HD" czy "HBO HD"
             playnow_map[epg_id] = name
             
         # Nadpisujemy ręcznie wyjątki, które na liście PlayNow miały specyficzne nazwy
@@ -1054,21 +1069,16 @@ class EPGMerger:
             "RadioEska.pl": "Radio Eska"
         }
         
-        # Aktualizujemy główny słownik o nasze wyjątki
         playnow_map.update(playnow_exceptions)
         
-        # Zastępujemy wszystkie identyfikatory w locie
-        xml_playnow_str = xml_base_str
         for orig_id, play_id in playnow_map.items():
-            # Dzięki cudzysłowom wymieniamy tylko precyzyjne atrybuty id="", 
-            # bez ryzyka uszkodzenia przypadkowych słów w opisach audycji
             xml_playnow_str = xml_playnow_str.replace(f'"{orig_id}"', f'"{play_id}"')
             
         file_playnow = os.path.join(OUTPUT_DIR, "epg_playnow.xml.gz")
         with gzip.open(file_playnow, 'wb') as f:
             f.write(xml_playnow_str.encode('utf-8'))
             
-        logging.info("Podwójny zapis zakończony sukcesem!")
+        logging.info("Podwójny zapis z osobnym limitem historii zakończony sukcesem!")
 
     def format_time(self, dt):
         return dt.strftime("%Y%m%d%H%M00 +0100")
