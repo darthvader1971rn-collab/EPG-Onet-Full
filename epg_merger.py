@@ -861,9 +861,16 @@ class EPGMerger:
                         ET.SubElement(ch, "display-name", lang="pl").text = custom_name
                         unique_names.add(custom_name)
                         
-            # Dodawanie audycji z uwzględnieniem podanego bufora historii
+            # --- SORTOWANIE AUDYCJI ---
+            # Sortujemy wszystkie zebrane programy: najpierw po ID kanału, potem po dacie startu
+            sorted_programmes = sorted(
+                self.all_programmes, 
+                key=lambda p: (p.get("channel", ""), p.get("start", ""))
+            )
+                        
+            # Dodawanie audycji z uwzględnieniem podanego bufora historii i po posortowaniu
             limit_dt = self.now - timedelta(hours=history_hours)
-            for p in self.all_programmes:
+            for p in sorted_programmes:
                 start_str = p.get("start")
                 if start_str:
                     try:
@@ -884,7 +891,7 @@ class EPGMerger:
             
             return xml_str
 
-        logging.info("Rozpoczynam budowanie struktury XML...")
+        logging.info("Rozpoczynam budowanie struktury XML i sortowanie chronologiczne...")
         
         # 1. Zapis standardowego pliku (4 dni historii dla recordera)
         logging.info("Budowanie pliku z 4-dniowym archiwum (epg_recorder.xml.gz)...")
