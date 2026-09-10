@@ -861,26 +861,58 @@ class EPGMerger:
                         ET.SubElement(ch, "display-name", lang="pl").text = custom_name
                         unique_names.add(custom_name)
                         
-            # --- SORTOWANIE AUDYCJI ---
-            # Sortujemy wszystkie zebrane programy: najpierw po ID kanału, potem po dacie startu
-            sorted_programmes = sorted(
-                self.all_programmes, 
-                key=lambda p: (p.get("channel", ""), p.get("start", ""))
-            )
-                        
-            # Dodawanie audycji z uwzględnieniem podanego bufora historii i po posortowaniu
+            # --- LOGIKA NAPRAWY NAKŁADANIA SIĘ CZASÓW (OVERLAPS) ---
+            from datetime import datetime
+
+            channels_dict = {}
+            for p in self.all_programmes:
+                ch_id = p.get("channel")
+                if ch_id not in channels_dict:
+                    channels_dict[ch_id] = []
+                channels_dict[ch_id].append(p)
+                
             limit_dt = self.now - timedelta(hours=history_hours)
-            for p in sorted_programmes:
-                start_str = p.get("start")
-                if start_str:
+            
+            for ch_id, progs in channels_dict.items():
+                # Sortowanie chronologiczne według startu dla danego kanału
+                progs.sort(key=lambda p: p.get("start", ""))
+                
+                valid_progs = []
+                for p in progs:
+                    st_str = p.get("start")
+                    if not st_str: continue
                     try:
-                        st_dt = datetime.strptime(start_str[:14], "%Y%m%d%H%M%S").replace(tzinfo=TZ)
+                        st_dt = datetime.strptime(st_str[:14], "%Y%m%d%H%M%S").replace(tzinfo=TZ)
                         if st_dt >= limit_dt:
-                            root.append(p)
+                            valid_progs.append((st_dt, p))
                     except Exception:
-                        root.append(p)
-                else:
-                    root.append(p)
+                        pass
+                
+                # Dynamiczna korekta czasów stop
+                for i in range(len(valid_progs)):
+                    curr_dt, curr_p = valid_progs[i]
+                    
+                    if i < len(valid_progs) - 1:
+                        next_dt, next_p = valid_progs[i+1]
+                        stop_str = curr_p.get("stop")
+                        
+                        try:
+                            if stop_str:
+                                stop_dt = datetime.strptime(stop_str[:14], "%Y%m%d%H%M%S").replace(tzinfo=TZ)
+                                # Jeśli audycja zachodzi na kolejną
+                                if stop_dt > next_dt:
+                                    new_stop_str = next_dt.strftime(f"%Y%m%d%H%M%S {next_dt.strftime('%z')}")
+                                    curr_p.set("stop", new_stop_str)
+                            else:
+                                # Jeśli w ogóle brakuje czasu stop, ucinamy równo ze startem kolejnej
+                                new_stop_str = next_dt.strftime(f"%Y%m%d%H%M%S {next_dt.strftime('%z')}")
+                                curr_p.set("stop", new_stop_str)
+                        except Exception:
+                            pass
+                            
+                    # Zabezpieczenie przed wpisami zerowymi
+                    if curr_p.get("start") != curr_p.get("stop"):
+                        root.append(curr_p)
                 
             if hasattr(ET, "indent"):
                 ET.indent(root)
@@ -891,7 +923,7 @@ class EPGMerger:
             
             return xml_str
 
-        logging.info("Rozpoczynam budowanie struktury XML i sortowanie chronologiczne...")
+        logging.info("Rozpoczynam budowanie struktury XML i naprawę czasów (Overlaps)...")
         
         # 1. Zapis standardowego pliku (4 dni historii dla recordera)
         logging.info("Budowanie pliku z 4-dniowym archiwum (epg_recorder.xml.gz)...")
@@ -903,12 +935,10 @@ class EPGMerger:
         logging.info("Budowanie pliku z 7-dniowym archiwum i tłumaczenie tagów dla PlayNow (epg_playnow.xml.gz)...")
         xml_playnow_str = build(168)
         
-        # Automatyczne budowanie słownika tłumaczącego dla WSZYSTKICH kanałów
         playnow_map = {}
         for name, (_, _, epg_id) in CHANNELS.items():
             playnow_map[epg_id] = name
             
-        # Nadpisujemy ręcznie wyjątki, które na liście PlayNow miały specyficzne nazwy
         playnow_exceptions = {
             "13UlicaHD.pl": "13 Ulica",
             "4FUNDANCE.pl": "4FUN Dance",
