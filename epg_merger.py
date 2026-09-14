@@ -94,7 +94,7 @@ CHANNELS = {
     "Eska Rock TV": ("hip-hop-tv-511", "onet", "EskaRockTV.pl"),
     "Eska TV HD": ("eska-tv-hd-221", "onet", "EskaTVHD.pl"),
     "Eska TV Extra HD": ("eska-tv-extra-597", "onet", "EskaTVExtra.pl"),
-    "Eurosport 1 Poland HD": ("eurosport-niem-366", "onet", "Eurosport1.pl"),
+    "Eurosport 1 Poland HD": ("eurosport-1-hd-97", "onet", "Eurosport1.pl"),
     "Eurosport 2 HD": ("eurosport-2-hd-120", "onet", "Eurosport2HD.pl"),
     "Eurosport 3": ("eurosport-3", "onet", "Eurosport3.pl"),
     "Eurosport 4": ("eurosport-4", "onet", "Eurosport4.pl"),
