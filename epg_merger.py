@@ -850,16 +850,32 @@ class EPGMerger:
         logging.info("="*50)
 
     def save(self):
-        def build(history_hours):
+        def build(history_hours, future_hours=None):
             root = ET.Element("tv", {
                 "generator-info-name": "EPG-Hybrid-Grabber", 
                 "generator-info-url": "https://epg.ovh"
             })
             
-            # --- GENERATOR ALIASÓW (Super Matching System) ---
+            extra_aliases = {
+                "HBO2HD.pl": ["HBO 2", "HBO 2 HD", "HBO 2 FHD"],
+                "HBO3HD.pl": ["HBO 3", "HBO 3 HD", "HBO 3 FHD"],
+                "WarnerTVHD.pl": ["Warner TV", "Warner TV HD"],
+                "FilmBoxPremiumHD.pl": ["FilmBox Premium", "FilmBox Premium HD"],
+                "FilmBoxExtraHD.pl": ["FilmBox Extra", "FilmBox Extra HD"],
+                "FilmBoxAction.pl": ["FilmBox Action"],
+                "FilmBoxFamily.pl": ["FilmBox Family"],
+                "FilmBoxArthouseHD.pl": ["FilmBox ArtHouse", "FilmBox ArtHouse 2", "FilmBox ArtHouse HD"],
+                "ParamountNetwork.pl": ["Paramount Channel", "Paramount Channel HD"],
+                "KinoTVHD.pl": ["Kino TV", "Kino TV HD"],
+                "FilmCafe.pl": ["Film Cafe", "Film Cafe PL"],
+                "Eurosport1.pl": ["Eurosport", "Eurosport 1", "Eurosport 1 HD"],
+                "PolsatSport1HD.pl": ["Polsat Sport 1", "Polsat Sport 1 HD"],
+                "PolsatSport2HD.pl": ["Polsat Sport 2", "Polsat Sport 2 HD"],
+                "PolsatSport3HD.pl": ["Polsat Sport 3", "Polsat Sport 3 HD"],
+            }
+            
             for name, (_, _, eid) in CHANNELS.items():
                 ch = ET.SubElement(root, "channel", id=eid)
-                
                 unique_names = set()
                 patterns = [
                     "{base}", "PL: {base}", "PL: {base} HD", "PL: {base} FHD", 
@@ -876,20 +892,31 @@ class EPGMerger:
                     ET.SubElement(ch, "display-name", lang="pl").text = display_name
                 
                 custom_names = [name, eid]
+                
+                if eid in extra_aliases:
+                    custom_names.extend(extra_aliases[eid])
+                
                 for custom_name in custom_names:
                     if custom_name not in unique_names:
                         ET.SubElement(ch, "display-name", lang="pl").text = custom_name
                         unique_names.add(custom_name)
                         
-            # Dodawanie audycji z uwzględnieniem podanego bufora historii
-            limit_dt = self.now - timedelta(hours=history_hours)
-            for p in self.all_programmes:
+            sorted_programmes = sorted(
+                self.all_programmes, 
+                key=lambda p: (p.get("channel", ""), p.get("start", ""))
+            )
+                        
+            limit_dt_start = self.now - timedelta(hours=history_hours)
+            limit_dt_end = (self.now + timedelta(hours=future_hours)) if future_hours else None
+            
+            for p in sorted_programmes:
                 start_str = p.get("start")
                 if start_str:
                     try:
                         st_dt = datetime.strptime(start_str[:14], "%Y%m%d%H%M%S").replace(tzinfo=TZ)
-                        if st_dt >= limit_dt:
-                            root.append(p)
+                        if st_dt >= limit_dt_start:
+                            if not limit_dt_end or st_dt <= limit_dt_end:
+                                root.append(p)
                     except Exception:
                         root.append(p)
                 else:
@@ -901,27 +928,22 @@ class EPGMerger:
             xml_bytes = ET.tostring(root, encoding='utf-8', xml_declaration=True)
             xml_str = xml_bytes.decode('utf-8')
             xml_str = xml_str.replace("?>", "?>\n<!DOCTYPE tv SYSTEM \"xmltv.dtd\">", 1)
-            
             return xml_str
 
-        logging.info("Rozpoczynam budowanie struktury XML...")
+        logging.info("Rozpoczynam budowanie struktury XML i sortowanie chronologiczne...")
         
-        # 1. Zapis standardowego pliku (4 dni historii dla recordera)
         logging.info("Budowanie pliku z 4-dniowym archiwum (epg_recorder.xml.gz)...")
         xml_recorder_str = build(96)
         with gzip.open(FILE_RECORDER, 'wb') as f: 
             f.write(xml_recorder_str.encode('utf-8'))
             
-        # 2. Generowanie drugiego pliku EPG dla PlayNow (7 dni historii)
         logging.info("Budowanie pliku z 7-dniowym archiwum i tłumaczenie tagów dla PlayNow (epg_playnow.xml.gz)...")
         xml_playnow_str = build(168)
         
-        # Automatyczne budowanie słownika tłumaczącego dla WSZYSTKICH kanałów
         playnow_map = {}
         for name, (_, _, epg_id) in CHANNELS.items():
             playnow_map[epg_id] = name
             
-        # Nadpisujemy ręcznie wyjątki, które na liście PlayNow miały specyficzne nazwy
         playnow_exceptions = {
             "13UlicaHD.pl": "13 Ulica",
             "4FUNDANCE.pl": "4FUN Dance",
@@ -1098,7 +1120,13 @@ class EPGMerger:
         with gzip.open(file_playnow, 'wb') as f:
             f.write(xml_playnow_str.encode('utf-8'))
             
-        logging.info("Podwójny zapis z osobnym limitem historii zakończony sukcesem!")
+        logging.info("Budowanie pliku nieskompresowanego dla Kodi (Kodi_EPG.xml)...")
+        xml_kodi_str = build(84, 168)
+        file_kodi = os.path.join(OUTPUT_DIR, "Kodi_EPG.xml")
+        with open(file_kodi, 'w', encoding='utf-8') as f:
+            f.write(xml_kodi_str)
+            
+        logging.info("Trzykrotny zapis zakończony sukcesem!")
 
     def format_time(self, dt):
         return dt.strftime("%Y%m%d%H%M00 +0100")
