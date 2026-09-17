@@ -734,26 +734,45 @@ class EPGMerger:
         return results
 
     def run(self, selected_days, detailed_days):
-        """Koordynuje pobieranie z systemem Fallback dla EPG zewnętrznego."""
         logging.info(f"Rozpoczynam pobieranie dla dni: {selected_days}")
         start_count = len(self.all_programmes)
         
-        # 1. Główne źródła: Onet i Interia (Wielowątkowo)
         with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
-            # Puszczamy parser tylko dla źródeł 'onet' i 'interia'
             futures = [executor.submit(self.process_channel, n, i, s, eid, selected_days, detailed_days) 
                        for n, (i, s, eid) in CHANNELS.items() if s in ['onet', 'interia']]
             for f in concurrent.futures.as_completed(futures):
                 self.all_programmes.extend(f.result())
 
-        # Tworzymy słownik do mapowania ID z plików XML na nasze własne docelowe ID (epg_id)
         xml_id_map = {}
         for name, (ident, src, epg_id) in CHANNELS.items():
             xml_id_map[epg_id] = epg_id
             if src == 'xml':
                 xml_id_map[ident] = epg_id
+                
+            xml_id_map[name] = epg_id
+            clean_name = re.sub(r'(?i)\s+(HD|FHD|4K|UHD|SD)$', '', name).strip()
+            xml_id_map[clean_name] = epg_id
 
-        # 2. Uzupełnianie z zewnętrznych list XML (Normalizator / Fallback)
+        fallback_aliases = {
+            "HBO 2": "HBO2HD.pl",
+            "HBO 3": "HBO3HD.pl",
+            "Warner TV": "WarnerTVHD.pl",
+            "FilmBox Premium": "FilmBoxPremiumHD.pl",
+            "FilmBox Extra HD": "FilmBoxExtraHD.pl",
+            "FilmBox Action": "FilmBoxAction.pl",
+            "FilmBox Family": "FilmBoxFamily.pl",
+            "FilmBox ArtHouse 2": "FilmBoxArthouseHD.pl",
+            "FilmBox ArtHouse": "FilmBoxArthouseHD.pl",
+            "Paramount Channel": "ParamountNetwork.pl",
+            "Kino TV HD": "KinoTVHD.pl",
+            "Kino TV": "KinoTVHD.pl",
+            "Film Cafe PL": "FilmCafe.pl",
+            "Polsat Sport 1": "PolsatSport1HD.pl",
+            "Polsat Sport 2": "PolsatSport2HD.pl",
+            "Polsat Sport 3": "PolsatSport3HD.pl",
+        }
+        xml_id_map.update(fallback_aliases)
+
         EXTERNAL_SOURCES = [
             OVH_URL, 
             OTOPAY_URL,
@@ -763,8 +782,6 @@ class EPGMerger:
         
         logging.info(f"Sprawdzanie źródeł zewnętrznych ({len(EXTERNAL_SOURCES)} źródeł)...")
         xml_added = 0
-        
-        # Dynamiczny limit czasowy: odrzucamy wszystko starsze niż 7 dni (168h)
         limit_dt = self.now - timedelta(hours=168)
         
         for idx, url in enumerate(EXTERNAL_SOURCES, 1):
@@ -790,19 +807,23 @@ class EPGMerger:
                     target_epg_id = xml_id_map.get(raw_cid)
                     
                     if target_epg_id and start:
-                        # Walidacja daty (odfiltrowanie starych śmieci)
                         try:
-                            st_str = start[:14] # Wyciągamy pierwsze 14 znaków, czyli np. "20260916020000"
+                            st_str = start[:14]
                             st_dt = datetime.strptime(st_str, "%Y%m%d%H%M%S").replace(tzinfo=TZ)
                             if st_dt < limit_dt:
-                                continue # Ignorujemy starą audycję i przechodzimy do kolejnej
+                                continue 
                         except Exception:
-                            pass # W razie błędu parsowania (uszkodzony atrybut start w źródle), przepuszczamy dalej
+                            pass 
                             
-                        # Logika Fallback / Normalizatora
+                        # Filtr anty-śmieciowy (Sendepause / Przerwy w programie)
+                        title_el = p.find("title")
+                        if title_el is not None and title_el.text:
+                            t_lower = title_el.text.strip().lower()
+                            if t_lower in ["sendpause", "sendepause", "przerwa w programie", "zakończenie programu"]:
+                                continue
+                            
                         if (target_epg_id, start) not in self.added_events:
                             p.set("channel", target_epg_id)
-                            
                             for tag in ['title', 'desc', 'category']:
                                 el = p.find(tag)
                                 if el is not None and not el.get('lang'):
@@ -817,7 +838,6 @@ class EPGMerger:
                 logging.error(f"  [!] SZCZEGÓŁOWY BŁĄD Fuzji EPG z {url}:")
                 logging.error("\n" + traceback.format_exc())
 
-        # 3. Podsumowanie sesji
         end_count = len(self.all_programmes)
         new_items = end_count - start_count
         
