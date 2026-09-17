@@ -734,45 +734,26 @@ class EPGMerger:
         return results
 
     def run(self, selected_days, detailed_days):
+        """Koordynuje pobieranie z systemem Fallback dla EPG zewnętrznego."""
         logging.info(f"Rozpoczynam pobieranie dla dni: {selected_days}")
         start_count = len(self.all_programmes)
         
+        # 1. Główne źródła: Onet i Interia (Wielowątkowo)
         with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
+            # Puszczamy parser tylko dla źródeł 'onet' i 'interia'
             futures = [executor.submit(self.process_channel, n, i, s, eid, selected_days, detailed_days) 
                        for n, (i, s, eid) in CHANNELS.items() if s in ['onet', 'interia']]
             for f in concurrent.futures.as_completed(futures):
                 self.all_programmes.extend(f.result())
 
+        # Tworzymy słownik do mapowania ID z plików XML na nasze własne docelowe ID (epg_id)
         xml_id_map = {}
         for name, (ident, src, epg_id) in CHANNELS.items():
             xml_id_map[epg_id] = epg_id
             if src == 'xml':
                 xml_id_map[ident] = epg_id
-                
-            xml_id_map[name] = epg_id
-            clean_name = re.sub(r'(?i)\s+(HD|FHD|4K|UHD|SD)$', '', name).strip()
-            xml_id_map[clean_name] = epg_id
 
-        fallback_aliases = {
-            "HBO 2": "HBO2HD.pl",
-            "HBO 3": "HBO3HD.pl",
-            "Warner TV": "WarnerTVHD.pl",
-            "FilmBox Premium": "FilmBoxPremiumHD.pl",
-            "FilmBox Extra HD": "FilmBoxExtraHD.pl",
-            "FilmBox Action": "FilmBoxAction.pl",
-            "FilmBox Family": "FilmBoxFamily.pl",
-            "FilmBox ArtHouse 2": "FilmBoxArthouseHD.pl",
-            "FilmBox ArtHouse": "FilmBoxArthouseHD.pl",
-            "Paramount Channel": "ParamountNetwork.pl",
-            "Kino TV HD": "KinoTVHD.pl",
-            "Kino TV": "KinoTVHD.pl",
-            "Film Cafe PL": "FilmCafe.pl",
-            "Polsat Sport 1": "PolsatSport1HD.pl",
-            "Polsat Sport 2": "PolsatSport2HD.pl",
-            "Polsat Sport 3": "PolsatSport3HD.pl",
-        }
-        xml_id_map.update(fallback_aliases)
-
+        # 2. Uzupełnianie z zewnętrznych list XML (Normalizator / Fallback)
         EXTERNAL_SOURCES = [
             OVH_URL, 
             OTOPAY_URL,
@@ -782,6 +763,8 @@ class EPGMerger:
         
         logging.info(f"Sprawdzanie źródeł zewnętrznych ({len(EXTERNAL_SOURCES)} źródeł)...")
         xml_added = 0
+        
+        # Dynamiczny limit czasowy: odrzucamy wszystko starsze niż 7 dni (168h)
         limit_dt = self.now - timedelta(hours=168)
         
         for idx, url in enumerate(EXTERNAL_SOURCES, 1):
@@ -807,23 +790,19 @@ class EPGMerger:
                     target_epg_id = xml_id_map.get(raw_cid)
                     
                     if target_epg_id and start:
+                        # Walidacja daty (odfiltrowanie starych śmieci)
                         try:
-                            st_str = start[:14]
+                            st_str = start[:14] # Wyciągamy pierwsze 14 znaków, czyli np. "20260916020000"
                             st_dt = datetime.strptime(st_str, "%Y%m%d%H%M%S").replace(tzinfo=TZ)
                             if st_dt < limit_dt:
-                                continue 
+                                continue # Ignorujemy starą audycję i przechodzimy do kolejnej
                         except Exception:
-                            pass 
+                            pass # W razie błędu parsowania (uszkodzony atrybut start w źródle), przepuszczamy dalej
                             
-                        # Filtr anty-śmieciowy (Sendepause / Przerwy w programie)
-                        title_el = p.find("title")
-                        if title_el is not None and title_el.text:
-                            t_lower = title_el.text.strip().lower()
-                            if t_lower in ["sendpause", "sendepause", "przerwa w programie", "zakończenie programu"]:
-                                continue
-                            
+                        # Logika Fallback / Normalizatora
                         if (target_epg_id, start) not in self.added_events:
                             p.set("channel", target_epg_id)
+                            
                             for tag in ['title', 'desc', 'category']:
                                 el = p.find(tag)
                                 if el is not None and not el.get('lang'):
@@ -838,6 +817,7 @@ class EPGMerger:
                 logging.error(f"  [!] SZCZEGÓŁOWY BŁĄD Fuzji EPG z {url}:")
                 logging.error("\n" + traceback.format_exc())
 
+        # 3. Podsumowanie sesji
         end_count = len(self.all_programmes)
         new_items = end_count - start_count
         
@@ -850,32 +830,16 @@ class EPGMerger:
         logging.info("="*50)
 
     def save(self):
-        def build(history_hours, future_hours=None):
+        def build(history_hours):
             root = ET.Element("tv", {
                 "generator-info-name": "EPG-Hybrid-Grabber", 
                 "generator-info-url": "https://epg.ovh"
             })
             
-            extra_aliases = {
-                "HBO2HD.pl": ["HBO 2", "HBO 2 HD", "HBO 2 FHD"],
-                "HBO3HD.pl": ["HBO 3", "HBO 3 HD", "HBO 3 FHD"],
-                "WarnerTVHD.pl": ["Warner TV", "Warner TV HD"],
-                "FilmBoxPremiumHD.pl": ["FilmBox Premium", "FilmBox Premium HD"],
-                "FilmBoxExtraHD.pl": ["FilmBox Extra", "FilmBox Extra HD"],
-                "FilmBoxAction.pl": ["FilmBox Action"],
-                "FilmBoxFamily.pl": ["FilmBox Family"],
-                "FilmBoxArthouseHD.pl": ["FilmBox ArtHouse", "FilmBox ArtHouse 2", "FilmBox ArtHouse HD"],
-                "ParamountNetwork.pl": ["Paramount Channel", "Paramount Channel HD"],
-                "KinoTVHD.pl": ["Kino TV", "Kino TV HD"],
-                "FilmCafe.pl": ["Film Cafe", "Film Cafe PL"],
-                "Eurosport1.pl": ["Eurosport", "Eurosport 1", "Eurosport 1 HD"],
-                "PolsatSport1HD.pl": ["Polsat Sport 1", "Polsat Sport 1 HD"],
-                "PolsatSport2HD.pl": ["Polsat Sport 2", "Polsat Sport 2 HD"],
-                "PolsatSport3HD.pl": ["Polsat Sport 3", "Polsat Sport 3 HD"],
-            }
-            
+            # --- GENERATOR ALIASÓW (Super Matching System) ---
             for name, (_, _, eid) in CHANNELS.items():
                 ch = ET.SubElement(root, "channel", id=eid)
+                
                 unique_names = set()
                 patterns = [
                     "{base}", "PL: {base}", "PL: {base} HD", "PL: {base} FHD", 
@@ -892,31 +856,20 @@ class EPGMerger:
                     ET.SubElement(ch, "display-name", lang="pl").text = display_name
                 
                 custom_names = [name, eid]
-                
-                if eid in extra_aliases:
-                    custom_names.extend(extra_aliases[eid])
-                
                 for custom_name in custom_names:
                     if custom_name not in unique_names:
                         ET.SubElement(ch, "display-name", lang="pl").text = custom_name
                         unique_names.add(custom_name)
                         
-            sorted_programmes = sorted(
-                self.all_programmes, 
-                key=lambda p: (p.get("channel", ""), p.get("start", ""))
-            )
-                        
-            limit_dt_start = self.now - timedelta(hours=history_hours)
-            limit_dt_end = (self.now + timedelta(hours=future_hours)) if future_hours else None
-            
-            for p in sorted_programmes:
+            # Dodawanie audycji z uwzględnieniem podanego bufora historii
+            limit_dt = self.now - timedelta(hours=history_hours)
+            for p in self.all_programmes:
                 start_str = p.get("start")
                 if start_str:
                     try:
                         st_dt = datetime.strptime(start_str[:14], "%Y%m%d%H%M%S").replace(tzinfo=TZ)
-                        if st_dt >= limit_dt_start:
-                            if not limit_dt_end or st_dt <= limit_dt_end:
-                                root.append(p)
+                        if st_dt >= limit_dt:
+                            root.append(p)
                     except Exception:
                         root.append(p)
                 else:
@@ -928,22 +881,27 @@ class EPGMerger:
             xml_bytes = ET.tostring(root, encoding='utf-8', xml_declaration=True)
             xml_str = xml_bytes.decode('utf-8')
             xml_str = xml_str.replace("?>", "?>\n<!DOCTYPE tv SYSTEM \"xmltv.dtd\">", 1)
+            
             return xml_str
 
-        logging.info("Rozpoczynam budowanie struktury XML i sortowanie chronologiczne...")
+        logging.info("Rozpoczynam budowanie struktury XML...")
         
+        # 1. Zapis standardowego pliku (4 dni historii dla recordera)
         logging.info("Budowanie pliku z 4-dniowym archiwum (epg_recorder.xml.gz)...")
         xml_recorder_str = build(96)
         with gzip.open(FILE_RECORDER, 'wb') as f: 
             f.write(xml_recorder_str.encode('utf-8'))
             
+        # 2. Generowanie drugiego pliku EPG dla PlayNow (7 dni historii)
         logging.info("Budowanie pliku z 7-dniowym archiwum i tłumaczenie tagów dla PlayNow (epg_playnow.xml.gz)...")
         xml_playnow_str = build(168)
         
+        # Automatyczne budowanie słownika tłumaczącego dla WSZYSTKICH kanałów
         playnow_map = {}
         for name, (_, _, epg_id) in CHANNELS.items():
             playnow_map[epg_id] = name
             
+        # Nadpisujemy ręcznie wyjątki, które na liście PlayNow miały specyficzne nazwy
         playnow_exceptions = {
             "13UlicaHD.pl": "13 Ulica",
             "4FUNDANCE.pl": "4FUN Dance",
@@ -1120,13 +1078,7 @@ class EPGMerger:
         with gzip.open(file_playnow, 'wb') as f:
             f.write(xml_playnow_str.encode('utf-8'))
             
-        logging.info("Budowanie pliku nieskompresowanego dla Kodi (Kodi_EPG.xml)...")
-        xml_kodi_str = build(84, 168)
-        file_kodi = os.path.join(OUTPUT_DIR, "Kodi_EPG.xml")
-        with open(file_kodi, 'w', encoding='utf-8') as f:
-            f.write(xml_kodi_str)
-            
-        logging.info("Trzykrotny zapis zakończony sukcesem!")
+        logging.info("Podwójny zapis z osobnym limitem historii zakończony sukcesem!")
 
     def format_time(self, dt):
         return dt.strftime("%Y%m%d%H%M00 +0100")
